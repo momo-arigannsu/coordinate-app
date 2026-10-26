@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コーデアプリ</title>
+<style>
+  /* ===== 色や余白の基本設定 ===== */
+  :root {
+    --bg: #faf7f5;
+    --card: #ffffff;
+    --text: #2b2b2b;
+    --sub: #8a8580;
+    --line: #e6e0db;
+    --accent: #d4728c;
+    --accent-bg: #fbe9ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 16px;
+    text-align: center;
+    font-weight: bold;
+    letter-spacing: 0.1em;
+  }
+  main {
+    max-width: 720px;      /* PCで見ても広がりすぎないように */
+    margin: 0 auto;
+    padding: 0 16px 96px;  /* 下のナビに隠れないよう余白 */
+  }
+  h2 { font-size: 16px; margin: 20px 0 8px; }
+  .label { font-size: 13px; color: var(--sub); margin: 16px 0 6px; }
+
+  /* ===== タグボタン（選ぶと色が付く） ===== */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .chip.on {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ===== 写真を撮るエリア ===== */
+  .photo-box {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: 320px;
+    border: 2px dashed var(--line);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--sub);
+    cursor: pointer;
+    overflow: hidden;
+    background: var(--card);
+  }
+  .photo-box img { width: 100%; height: 100%; object-fit: cover; }
+  #photoInput { display: none; }
+
+  .btn {
+    display: block;
+    width: 100%;
+    margin-top: 24px;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  .msg { color: var(--accent); font-size: 13px; margin-top: 8px; min-height: 1em; }
+
+  /* ===== クローゼット一覧 ===== */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .item {
+    background: var(--card);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
+  .item .tags { font-size: 11px; color: var(--sub); padding: 6px; line-height: 1.4; }
+  .item .del {
+    position: absolute; top: 4px; right: 4px;
+    border: none; border-radius: 50%;
+    width: 24px; height: 24px;
+    background: rgba(255,255,255,0.85);
+    cursor: pointer;
+  }
+  .empty { color: var(--sub); text-align: center; margin-top: 40px; }
+
+  /* ===== 下のナビゲーション ===== */
+  nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    display: flex;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+  }
+  nav button {
+    flex: 1;
+    padding: 14px 0;
+    border: none;
+    background: none;
+    font-size: 14px;
+    color: var(--sub);
+    cursor: pointer;
+  }
+  nav button.on { color: var(--accent); font-weight: bold; }
+
+  .screen { display: none; }
+  .screen.on { display: block; }
+</style>
+</head>
+<body>
+
+<header>MY CLOSET</header>
+
+<main>
+  <!-- ========== 画面1：クローゼット一覧 ========== -->
+  <section id="closetScreen" class="screen on">
+    <div class="chips" id="filterChips"></div>
+    <div class="grid" id="closetGrid"></div>
+  </section>
+
+  <!-- ========== 画面2：服の登録 ========== -->
+  <section id="addScreen" class="screen">
+    <h2>服を登録</h2>
+
+    <label class="photo-box" id="photoBox" for="photoInput">📷 タップして写真を撮る</label>
+    <!-- capture="environment" でスマホなら背面カメラが開く。PCならファイル選択 -->
+    <input type="file" id="photoInput" accept="image/*" capture="environment">
+
+    <div class="label">種類（1つ）</div>
+    <div class="chips" id="typeChips"></div>
+
+    <div class="label">季節（いくつでも）</div>
+    <div class="chips" id="seasonChips"></div>
+
+    <div class="label">雰囲気（いくつでも）</div>
+    <div class="chips" id="vibeChips"></div>
+
+    <div class="label">色（1つ）</div>
+    <div class="chips" id="colorChips"></div>
+
+    <button class="btn" id="saveBtn">保存する</button>
+    <div class="msg" id="msg"></div>
+  </section>
+</main>
+
+<nav>
+  <button class="on" data-screen="closetScreen">クローゼット</button>
+  <button data-screen="addScreen">＋ 服を登録</button>
+</nav>
+
+<script>
+// ==============================
+// タグの種類（ここを書き換えればタグを増やせる）
+// ==============================
+const TYPES   = ["トップス", "ボトムス", "ワンピース", "アウター", "靴", "アクセ"];
+const SEASONS = ["春", "夏", "秋", "冬"];
+const VIBES   = ["メンズライク", "カジュアル", "綺麗め", "海外ガール", "ダル着", "女の子らしい", "韓国っぽ"];
+const COLORS  = ["白", "黒", "グレー", "ベージュ", "ブラウン", "ネイビー", "青", "緑", "赤", "ピンク", "黄", "紫", "柄"];
+
+const STORAGE_KEY = "closet-items";
+
+// ==============================
+// 保存・読み込み（localStorage = ブラウザ内の保存場所）
+// ==============================
+function loadItems() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveItems(items) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    return true;
+  } catch (e) {
+    // 容量オーバーのときはここに来る
+    return false;
+  }
+}
+
+// ==============================
+// タグボタンを作る関数
+// multi = true なら複数選択、false なら1つだけ
+// ==============================
+function makeChips(containerId, list, multi) {
+  const box = document.getElementById(containerId);
+  box.innerHTML = "";
+  list.forEach(name => {
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.textContent = name;
+    chip.type = "button";
+    chip.addEventListener("click", () => {
+      if (!multi) {
+        // 1つだけ選べるタイプは、他の選択を外す
+        box.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+      }
+      chip.classList.toggle("on");
+    });
+    box.appendChild(chip);
+  });
+}
+
+// 選ばれているタグの名前を配列で取り出す
+function getSelected(containerId) {
+  return [...document.querySelectorAll("#" + containerId + " .chip.on")].map(c => c.textContent);
+}
+
+// ==============================
+// 写真の処理
+// そのままだと重すぎて保存できないので、縮小してから保存する
+// ==============================
+let currentPhoto = null; // 今選んでいる写真（縮小済み）
+
+document.getElementById("photoInput").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      // 正方形に切り抜いて 400px に縮小
+      const size = 400;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2;
+      const sy = (img.height - side) / 2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+
+      currentPhoto = canvas.toDataURL("image/jpeg", 0.7); // 画質70%のJPEGに変換
+      document.getElementById("photoBox").innerHTML = '<img src="' + currentPhoto + '" alt="選んだ服">';
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+// ==============================
+// 保存ボタン
+// ==============================
+document.getElementById("saveBtn").addEventListener("click", () => {
+  const msg = document.getElementById("msg");
+  const type = getSelected("typeChips")[0];
+
+  // 入力チェック：写真と種類は必須
+  if (!currentPhoto) { msg.textContent = "写真を選んでね"; return; }
+  if (!type)         { msg.textContent = "種類を選んでね"; return; }
+
+  const item = {
+    id: Date.now(),                       // かぶらない番号として今の時刻を使う
+    photo: currentPhoto,
+    type: type,
+    seasons: getSelected("seasonChips"),
+    vibes: getSelected("vibeChips"),
+    color: getSelected("colorChips")[0] || "",
+    createdAt: new Date().toISOString()
+  };
+
+  const items = loadItems();
+  items.push(item);
+
+  if (!saveItems(items)) {
+    msg.textContent = "保存できる容量がいっぱいみたい…";
+    return;
+  }
+
+  resetForm();
+  msg.textContent = "保存したよ！";
+  renderCloset();
+});
+
+// フォームを空に戻す
+function resetForm() {
+  currentPhoto = null;
+  document.getElementById("photoInput").value = "";
+  document.getElementById("photoBox").textContent = "📷 タップして写真を撮る";
+  document.querySelectorAll("#addScreen .chip").forEach(c => c.classList.remove("on"));
+}
+
+// ==============================
+// クローゼット一覧の表示
+// ==============================
+let currentFilter = "すべて";
+
+function renderFilter() {
+  const box = document.getElementById("filterChips");
+  box.innerHTML = "";
+  ["すべて", ...TYPES].forEach(name => {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (name === currentFilter ? " on" : "");
+    chip.textContent = name;
+    chip.addEventListener("click", () => {
+      currentFilter = name;
+      renderFilter();
+      renderCloset();
+    });
+    box.appendChild(chip);
+  });
+}
+
+function renderCloset() {
+  const grid = document.getElementById("closetGrid");
+  let items = loadItems();
+  if (currentFilter !== "すべて") {
+    items = items.filter(i => i.type === currentFilter);
+  }
+
+  if (items.length === 0) {
+    grid.innerHTML = '<p class="empty" style="grid-column: 1 / -1;">まだ服がないよ。下の「＋ 服を登録」から追加してね</p>';
+    return;
+  }
+
+  grid.innerHTML = "";
+  // 新しく登録した順に並べる
+  items.slice().reverse().forEach(item => {
+    const card = document.createElement("div");
+    card.className = "item";
+
+    const img = document.createElement("img");
+    img.src = item.photo;
+    img.alt = item.type;
+
+    const tags = document.createElement("div");
+    tags.className = "tags";
+    tags.textContent = [item.type, item.color, ...item.seasons, ...item.vibes].filter(Boolean).join(" / ");
+
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "×";
+    del.setAttribute("aria-label", "削除");
+    del.addEventListener("click", () => {
+      if (!confirm("この服を削除する？")) return;
+      saveItems(loadItems().filter(i => i.id !== item.id));
+      renderCloset();
+    });
+
+    card.append(img, tags, del);
+    grid.appendChild(card);
+  });
+}
+
+// ==============================
+// 画面の切り替え（下のナビ）
+// ==============================
+document.querySelectorAll("nav button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("on"));
+    document.querySelectorAll(".screen").forEach(s => s.classList.remove("on"));
+    btn.classList.add("on");
+    document.getElementById(btn.dataset.screen).classList.add("on");
+    document.getElementById("msg").textContent = "";
+  });
+});
+
+// ==============================
+// 最初の準備
+// ==============================
+makeChips("typeChips", TYPES, false);
+makeChips("seasonChips", SEASONS, true);
+makeChips("vibeChips", VIBES, true);
+makeChips("colorChips", COLORS, false);
+renderFilter();
+renderCloset();
+</script>
+</body>
+</html>
