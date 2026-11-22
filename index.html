@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>コーデアプリ</title>
+<!-- Supabase（ネット上の倉庫）とやりとりするための道具 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
   /* ===== 色や余白の基本設定 ===== */
   :root {
@@ -129,11 +131,117 @@
 
   .screen { display: none; }
   .screen.on { display: block; }
+
+  /* ===== ログインしてるかどうかで見せるものを切り替える ===== */
+  body:not(.logged-in) main,
+  body:not(.logged-in) nav,
+  body:not(.logged-in) .user-bar { display: none; }
+  body.logged-in #authScreen { display: none; }
+  body.loading main, body.loading nav, body.loading #authScreen { display: none; }
+
+  /* ===== ヘッダーのユーザー表示 ===== */
+  header { display: flex; align-items: center; justify-content: center; gap: 8px; }
+  body.logged-in header { justify-content: space-between; }
+  .user-bar {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: normal; letter-spacing: 0;
+  }
+  .user-bar .name { color: var(--sub); }
+  .user-bar button {
+    border: 1px solid var(--line); background: var(--card); color: var(--sub);
+    border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+
+  /* ===== ログイン・新規登録の画面 ===== */
+  #authScreen { max-width: 420px; margin: 0 auto; padding: 8px 16px 48px; }
+  .auth-tabs { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px; margin: 8px 0 20px; }
+  .auth-tabs button {
+    flex: 1; border: none; background: none; padding: 10px; border-radius: 999px;
+    font-size: 14px; color: var(--sub); cursor: pointer;
+  }
+  .auth-tabs button.on { background: var(--accent); color: #fff; font-weight: bold; }
+  .field { display: block; margin-bottom: 14px; }
+  .field span { display: block; font-size: 13px; color: var(--sub); margin-bottom: 6px; }
+  .field small { display: block; font-size: 11px; color: var(--sub); margin-top: 4px; }
+  .field input, .field select {
+    width: 100%; padding: 12px; font-size: 16px; /* 16px以上でiPhoneの自動ズームを防ぐ */
+    border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text);
+  }
+  .optional {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 14px 14px 2px; margin: 20px 0 4px;
+  }
+  .optional p { font-size: 12px; color: var(--sub); line-height: 1.6; margin: 0 0 12px; }
+  .optional b { color: var(--text); font-size: 13px; }
+  .auth-form { display: none; }
+  .auth-form.on { display: block; }
+  .btn:disabled { opacity: .5; cursor: default; }
 </style>
 </head>
-<body>
+<body class="loading">
 
-<header>MY CLOSET</header>
+<header>
+  MY CLOSET
+  <div class="user-bar">
+    <span class="name" id="userName"></span>
+    <button type="button" id="logoutBtn">ログアウト</button>
+  </div>
+</header>
+
+<!-- ========== ログイン・新規登録 ========== -->
+<section id="authScreen">
+  <div class="auth-tabs">
+    <button type="button" class="on" data-form="loginForm">ログイン</button>
+    <button type="button" data-form="signupForm">新規登録</button>
+  </div>
+
+  <!-- ログイン -->
+  <form class="auth-form on" id="loginForm" novalidate>
+    <label class="field"><span>メールアドレス</span>
+      <input type="email" id="loginEmail" autocomplete="email" required></label>
+    <label class="field"><span>パスワード</span>
+      <input type="password" id="loginPassword" autocomplete="current-password" required></label>
+    <button class="btn" type="submit">ログイン</button>
+    <div class="msg" id="loginMsg"></div>
+  </form>
+
+  <!-- 新規登録 -->
+  <form class="auth-form" id="signupForm" novalidate>
+    <label class="field"><span>メールアドレス</span>
+      <input type="email" id="suEmail" autocomplete="email" required></label>
+    <label class="field"><span>パスワード</span>
+      <input type="password" id="suPassword" autocomplete="new-password" required>
+      <small>6文字以上</small></label>
+    <label class="field"><span>ユーザー名</span>
+      <input type="text" id="suUsername" autocapitalize="off" autocomplete="username" required>
+      <small>検索で使うID。半角の英小文字・数字・_ で3〜20文字</small></label>
+    <label class="field"><span>表示名</span>
+      <input type="text" id="suDisplay" maxlength="20"></label>
+
+    <div class="label">骨格シルエット（台紙の人形の形になるよ）</div>
+    <div class="chips" id="silhouetteChips"></div>
+
+    <div class="optional">
+      <p><b>ここから下は入れなくてもOK</b><br>
+      入れてくれた情報は、だれのものか分からない形にまとめて「20代女性の人気コーデ」みたいな統計にだけ使います。ほかの人には見えません。</p>
+      <label class="field"><span>性別</span>
+        <select id="suGender">
+          <option value="">選ばない</option>
+          <option value="female">女性</option>
+          <option value="male">男性</option>
+          <option value="other">その他</option>
+          <option value="no_answer">答えない</option>
+        </select></label>
+      <label class="field"><span>生まれた年</span>
+        <select id="suBirthYear"><option value="">選ばない</option></select></label>
+      <label class="field"><span>住んでいる都道府県</span>
+        <select id="suPref"><option value="">選ばない</option></select></label>
+    </div>
+
+    <button class="btn" type="submit">登録する</button>
+    <div class="msg" id="signupMsg"></div>
+  </form>
+</section>
 
 <main>
   <!-- ========== 画面1：クローゼット一覧 ========== -->
@@ -415,8 +523,143 @@ function migrateFromTempVersion() {
 }
 
 // ==============================
+// Supabase（ネット上の倉庫）につなぐ
+// publishable key はアプリに書いても大丈夫な「入口の鍵」
+// （secret / service_role の鍵は絶対にここに書かない）
+// ==============================
+const SUPABASE_URL = "https://oczcojgwcjoklonxhkbj.supabase.co";
+const SUPABASE_KEY = "sb_publishable_x0BJBMa4xnpwoFc9JJDi_Q_8Uf7CSan";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const SILHOUETTES = { straight: "ストレート", wave: "ウェーブ", natural: "ナチュラル" };
+const PREFS = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+
+// ===== 登録画面の選択肢を作る =====
+function setupSignupOptions() {
+  // 骨格シルエット（1つだけ選べる。最初はストレート）
+  makeChips("silhouetteChips", Object.values(SILHOUETTES), false);
+  document.querySelector("#silhouetteChips .chip").classList.add("on");
+
+  // 生まれた年（新しい年が上）
+  const yearSel = document.getElementById("suBirthYear");
+  const thisYear = new Date().getFullYear();
+  for (let y = thisYear - 10; y >= 1940; y--) {
+    yearSel.add(new Option(y + "年", y));
+  }
+  // 都道府県
+  const prefSel = document.getElementById("suPref");
+  PREFS.forEach(p => prefSel.add(new Option(p, p)));
+}
+
+// ===== ログイン／新規登録のタブ切り替え =====
+document.querySelectorAll(".auth-tabs button").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".auth-tabs button").forEach(t => t.classList.toggle("on", t === tab));
+    document.querySelectorAll(".auth-form").forEach(f => f.classList.toggle("on", f.id === tab.dataset.form));
+    document.getElementById("loginMsg").textContent = "";
+    document.getElementById("signupMsg").textContent = "";
+  });
+});
+
+// ===== Supabaseの英語のエラーを日本語にする =====
+function toJapanese(error) {
+  const m = (error && error.message) || "";
+  if (m.includes("Invalid login credentials")) return "メールアドレスかパスワードが違うみたい";
+  if (m.includes("already registered"))        return "そのメールアドレスはもう登録されてるよ。ログインしてみてね";
+  if (m.includes("Database error saving"))     return "そのユーザー名はもう使われてるみたい。別のにしてね";
+  if (m.includes("Password should be"))        return "パスワードは6文字以上にしてね";
+  if (m.includes("valid email") || m.includes("invalid format")) return "メールアドレスの形がおかしいかも";
+  if (m.includes("rate limit") || m.includes("security purposes")) return "短い時間に何回も試したみたい。少し待ってからもう一回やってね";
+  if (m.includes("Failed to fetch"))           return "ネットにつながってないかも";
+  return "うまくいかへんかった…（" + m + "）";
+}
+
+// ===== ログイン =====
+document.getElementById("loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = document.getElementById("loginMsg");
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  if (!email || !password) { msg.textContent = "メールアドレスとパスワードを入れてね"; return; }
+
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true; msg.textContent = "ログイン中…";
+  const { error } = await db.auth.signInWithPassword({ email, password });
+  btn.disabled = false;
+  msg.textContent = error ? toJapanese(error) : "";
+  // 成功したら onAuthStateChange（下）が画面を切り替える
+});
+
+// ===== 新規登録 =====
+document.getElementById("signupForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = document.getElementById("signupMsg");
+  const email    = document.getElementById("suEmail").value.trim();
+  const password = document.getElementById("suPassword").value;
+  const username = document.getElementById("suUsername").value.trim().toLowerCase();
+  const display  = document.getElementById("suDisplay").value.trim();
+  const silName  = getSelected("silhouetteChips")[0] || "ストレート";
+  const silhouette = Object.keys(SILHOUETTES).find(k => SILHOUETTES[k] === silName);
+
+  // 入力チェック
+  if (!email)                          { msg.textContent = "メールアドレスを入れてね"; return; }
+  if (password.length < 6)             { msg.textContent = "パスワードは6文字以上にしてね"; return; }
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) { msg.textContent = "ユーザー名は半角の英小文字・数字・_ で3〜20文字にしてね"; return; }
+
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true; msg.textContent = "登録中…";
+
+  // ① アカウントを作る（ユーザー名などは倉庫側で自動的にプロフィールの棚に入る）
+  const { data, error } = await db.auth.signUp({
+    email, password,
+    options: { data: { username, display_name: display || username, silhouette } }
+  });
+  if (error) { btn.disabled = false; msg.textContent = toJapanese(error); return; }
+
+  // ② 任意の情報（性別・生まれ年・都道府県）を、本人しか見えない棚に入れる
+  const gender     = document.getElementById("suGender").value || null;
+  const birth_year = Number(document.getElementById("suBirthYear").value) || null;
+  const prefecture = document.getElementById("suPref").value || null;
+  if (data.session && (gender || birth_year || prefecture)) {
+    const { error: e2 } = await db.from("profile_private")
+      .update({ gender, birth_year, prefecture })
+      .eq("id", data.user.id);
+    if (e2) console.warn("任意の情報を保存できへんかった", e2);
+  }
+
+  btn.disabled = false;
+  if (!data.session) {
+    // 「確認メール」がオンのままだとここに来る
+    msg.textContent = "確認メールを送ったよ。メールのリンクを押してからログインしてね";
+  }
+});
+
+// ===== ログアウト =====
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  await db.auth.signOut();
+});
+
+// ===== ログイン状態が変わったら画面を切り替える =====
+async function showUser(session) {
+  document.body.classList.remove("loading");
+  document.body.classList.toggle("logged-in", !!session);
+  if (!session) return;
+
+  // ヘッダーに自分のユーザー名を出す
+  const { data } = await db.from("profiles")
+    .select("username, display_name").eq("id", session.user.id).single();
+  document.getElementById("userName").textContent = data ? "@" + data.username : "";
+}
+
+db.auth.onAuthStateChange((_event, session) => {
+  // この中で await するとSupabaseの処理が止まることがあるので、少しずらして実行する
+  setTimeout(() => showUser(session), 0);
+});
+
+// ==============================
 // 最初の準備
 // ==============================
+setupSignupOptions();
 migrateFromTempVersion();
 makeChips("typeChips", TYPES, false);
 makeChips("seasonChips", SEASONS, true);
