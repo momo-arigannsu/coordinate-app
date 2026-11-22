@@ -176,6 +176,14 @@
   .auth-form { display: none; }
   .auth-form.on { display: block; }
   .btn:disabled { opacity: .5; cursor: default; }
+
+  /* ===== 引っ越しのお知らせ ===== */
+  .migrate {
+    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 16px;
+    padding: 14px; margin: 4px 0 16px;
+  }
+  .migrate p { margin: 0; font-size: 14px; line-height: 1.6; }
+  .migrate .btn { margin-top: 12px; }
 </style>
 </head>
 <body class="loading">
@@ -246,6 +254,12 @@
 <main>
   <!-- ========== 画面1：クローゼット一覧 ========== -->
   <section id="closetScreen" class="screen on">
+    <!-- スマホの中の服を倉庫に引っ越すボタン（引っ越す服があるときだけ出る） -->
+    <div class="migrate" id="migrateBox" hidden>
+      <p id="migrateText"></p>
+      <button class="btn" type="button" id="migrateBtn">倉庫に引っ越す</button>
+      <div class="msg" id="migrateMsg"></div>
+    </div>
     <div class="chips" id="filterChips"></div>
     <div class="grid" id="closetGrid"></div>
   </section>
@@ -374,9 +388,73 @@ document.getElementById("photoInput").addEventListener("change", e => {
 });
 
 // ==============================
+// 服の種類：画面に出す名前 ⇔ 倉庫に保存する名前
+// ==============================
+const CAT_CODE = { "トップス":"tops", "ボトムス":"bottoms", "ワンピース":"onepiece", "アウター":"outer", "靴":"shoes", "バッグ":"bag", "アクセ":"acc" };
+const CAT_NAME = Object.fromEntries(Object.entries(CAT_CODE).map(([k, v]) => [v, k]));
+
+let currentUser = null; // ログインしている人
+let myClothes = [];     // 倉庫から読み込んだ自分の服
+
+// ==============================
+// 倉庫に服を1着保存する（写真 → 写真置き場、タグ → clothesの棚）
+// ==============================
+async function uploadCloth({ photo, type, seasons, vibes, color }) {
+  // 写真（文字列になってる画像）をファイルの形に戻す
+  const blob = await (await fetch(photo)).blob();
+  // 写真の置き場所は「自分のID/ランダムな名前.jpg」
+  const rand = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : Date.now() + "-" + Math.random().toString(36).slice(2);
+  const path = currentUser.id + "/" + rand + ".jpg";
+
+  const up = await db.storage.from("clothes").upload(path, blob, { contentType: "image/jpeg" });
+  if (up.error) throw up.error;
+
+  const ins = await db.from("clothes").insert({
+    image_path: path,
+    category: CAT_CODE[type] || "tops",
+    color: color || null,
+    season: seasons || [],
+    styles: vibes || []
+  });
+  if (ins.error) {
+    // 棚に入れられへんかったら、置いた写真も片付ける
+    await db.storage.from("clothes").remove([path]);
+    throw ins.error;
+  }
+}
+
+// ==============================
+// 倉庫から自分の服を読み込む
+// ==============================
+async function loadMyClothes() {
+  const { data, error } = await db.from("clothes")
+    .select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false });
+  if (error) { console.warn(error); myClothes = []; return; }
+
+  // 写真置き場は鍵付きなので、1時間だけ見られる「期限付きURL」をまとめてもらう
+  let urls = {};
+  if (data.length) {
+    const { data: signed } = await db.storage.from("clothes")
+      .createSignedUrls(data.map(c => c.image_path), 60 * 60);
+    (signed || []).forEach(s => { if (s.signedUrl) urls[s.path] = s.signedUrl; });
+  }
+
+  myClothes = data.map(c => ({
+    id: c.id,
+    path: c.image_path,
+    photo: urls[c.image_path] || "",
+    type: CAT_NAME[c.category] || c.category,
+    seasons: c.season || [],
+    vibes: c.styles || [],
+    color: c.color || ""
+  }));
+}
+
+// ==============================
 // 保存ボタン
 // ==============================
-document.getElementById("saveBtn").addEventListener("click", () => {
+document.getElementById("saveBtn").addEventListener("click", async e => {
   const msg = document.getElementById("msg");
   const type = getSelected("typeChips")[0];
 
@@ -384,27 +462,25 @@ document.getElementById("saveBtn").addEventListener("click", () => {
   if (!currentPhoto) { msg.textContent = "写真を選んでね"; return; }
   if (!type)         { msg.textContent = "種類を選んでね"; return; }
 
-  const item = {
-    id: Date.now(),                       // かぶらない番号として今の時刻を使う
-    photo: currentPhoto,
-    type: type,
-    seasons: getSelected("seasonChips"),
-    vibes: getSelected("vibeChips"),
-    color: getSelected("colorChips")[0] || "",
-    createdAt: new Date().toISOString()
-  };
-
-  const items = loadItems();
-  items.push(item);
-
-  if (!saveItems(items)) {
-    msg.textContent = "保存できる容量がいっぱいみたい…";
-    return;
+  const btn = e.currentTarget;
+  btn.disabled = true; msg.textContent = "保存中…";
+  try {
+    await uploadCloth({
+      photo: currentPhoto,
+      type: type,
+      seasons: getSelected("seasonChips"),
+      vibes: getSelected("vibeChips"),
+      color: getSelected("colorChips")[0] || ""
+    });
+    resetForm();
+    msg.textContent = "保存したよ！";
+    await loadMyClothes();
+    renderCloset();
+  } catch (err) {
+    console.warn(err);
+    msg.textContent = "保存できへんかった…ネットにつながってるか確認してね";
   }
-
-  resetForm();
-  msg.textContent = "保存したよ！";
-  renderCloset();
+  btn.disabled = false;
 });
 
 // フォームを空に戻す
@@ -438,7 +514,7 @@ function renderFilter() {
 
 function renderCloset() {
   const grid = document.getElementById("closetGrid");
-  let items = loadItems();
+  let items = myClothes;
   if (currentFilter !== "すべて") {
     items = items.filter(i => i.type === currentFilter);
   }
@@ -449,8 +525,8 @@ function renderCloset() {
   }
 
   grid.innerHTML = "";
-  // 新しく登録した順に並べる
-  items.slice().reverse().forEach(item => {
+  // 新しく登録した順（読み込むときに並べ替え済み）
+  items.forEach(item => {
     const card = document.createElement("div");
     card.className = "item";
 
@@ -466,9 +542,12 @@ function renderCloset() {
     del.className = "del";
     del.textContent = "×";
     del.setAttribute("aria-label", "削除");
-    del.addEventListener("click", () => {
+    del.addEventListener("click", async () => {
       if (!confirm("この服を削除する？")) return;
-      saveItems(loadItems().filter(i => i.id !== item.id));
+      const { error } = await db.from("clothes").delete().eq("id", item.id);
+      if (error) { alert("削除できへんかった…"); return; }
+      await db.storage.from("clothes").remove([item.path]);
+      myClothes = myClothes.filter(c => c.id !== item.id);
       renderCloset();
     });
 
@@ -476,6 +555,54 @@ function renderCloset() {
     grid.appendChild(card);
   });
 }
+
+// ==============================
+// 引っ越し：スマホの中（localStorage）の服を倉庫に移す
+// スマホの中の服は消さずに残しておく（念のための控え）
+// ==============================
+function movedKey() { return "closet-moved-ids-" + currentUser.id; }
+// もう引っ越した服の番号を覚えておく（途中で失敗してもやり直しで二重にならない）
+function loadMovedIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(movedKey())) || []); } catch (e) { return new Set(); }
+}
+function saveMovedIds(set) {
+  try { localStorage.setItem(movedKey(), JSON.stringify([...set])); } catch (e) {}
+}
+function notMovedYet() {
+  const moved = loadMovedIds();
+  return loadItems().filter(i => !moved.has(String(i.id)));
+}
+
+function showMigrateBox() {
+  const box = document.getElementById("migrateBox");
+  const rest = notMovedYet();
+  if (!rest.length) { box.hidden = true; return; }
+  document.getElementById("migrateText").textContent =
+    "このスマホの中に、前に登録した服が" + rest.length + "着あるよ。倉庫に引っ越すと、ほかのスマホやPCからも見られるようになる。";
+  box.hidden = false;
+}
+
+document.getElementById("migrateBtn").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  const msg = document.getElementById("migrateMsg");
+  const rest = notMovedYet();
+  const moved = loadMovedIds();
+  btn.disabled = true;
+  let ng = 0;
+  for (let i = 0; i < rest.length; i++) {
+    msg.textContent = "引っ越し中… " + (i + 1) + " / " + rest.length;
+    try {
+      await uploadCloth(rest[i]);
+      moved.add(String(rest[i].id));
+      saveMovedIds(moved); // 1着ごとに覚える
+    } catch (err) { console.warn(err); ng++; }
+  }
+  msg.textContent = ng ? ng + "着うまくいかへんかった。もう一回押すと、残りの服だけ送り直すよ" : "";
+  btn.disabled = false;
+  await loadMyClothes();
+  renderCloset();
+  showMigrateBox();
+});
 
 // ==============================
 // 画面の切り替え（下のナビ）
@@ -643,7 +770,12 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
 async function showUser(session) {
   document.body.classList.remove("loading");
   document.body.classList.toggle("logged-in", !!session);
-  if (!session) return;
+  if (!session) { currentUser = null; myClothes = []; renderCloset(); return; }
+  currentUser = session.user;
+
+  // 自分の服を倉庫から読み込んで表示
+  document.getElementById("closetGrid").innerHTML = '<p class="empty" style="grid-column: 1 / -1;">読み込み中…</p>';
+  loadMyClothes().then(() => { renderCloset(); showMigrateBox(); });
 
   // ヘッダーに自分のユーザー名を出す
   const { data } = await db.from("profiles")
@@ -666,7 +798,6 @@ makeChips("seasonChips", SEASONS, true);
 makeChips("vibeChips", VIBES, true);
 makeChips("colorChips", COLORS, false);
 renderFilter();
-renderCloset();
 </script>
 </body>
 </html>
