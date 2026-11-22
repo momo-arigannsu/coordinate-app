@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コーデアプリ</title>
+<!-- Supabase（ネット上の倉庫）とやりとりするための道具 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  /* ===== 色や余白の基本設定 ===== */
+  :root {
+    --bg: #faf7f5;
+    --card: #ffffff;
+    --text: #2b2b2b;
+    --sub: #8a8580;
+    --line: #e6e0db;
+    --accent: #d4728c;
+    --accent-bg: #fbe9ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 16px;
+    text-align: center;
+    font-weight: bold;
+    letter-spacing: 0.1em;
+  }
+  main {
+    max-width: 720px;      /* PCで見ても広がりすぎないように */
+    margin: 0 auto;
+    padding: 0 16px 96px;  /* 下のナビに隠れないよう余白 */
+  }
+  h2 { font-size: 16px; margin: 20px 0 8px; }
+  .label { font-size: 13px; color: var(--sub); margin: 16px 0 6px; }
+
+  /* ===== タグボタン（選ぶと色が付く） ===== */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .chip.on {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ===== 写真を撮るエリア ===== */
+  .photo-box {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: 320px;
+    border: 2px dashed var(--line);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--sub);
+    cursor: pointer;
+    overflow: hidden;
+    background: var(--card);
+  }
+  .photo-box img { width: 100%; height: 100%; object-fit: cover; }
+  #photoInput { display: none; }
+
+  .btn {
+    display: block;
+    width: 100%;
+    margin-top: 24px;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  .msg { color: var(--accent); font-size: 13px; margin-top: 8px; min-height: 1em; }
+
+  /* ===== クローゼット一覧 ===== */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .item {
+    background: var(--card);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
+  .item .tags { font-size: 11px; color: var(--sub); padding: 6px; line-height: 1.4; }
+  .item .del {
+    position: absolute; top: 4px; right: 4px;
+    border: none; border-radius: 50%;
+    width: 24px; height: 24px;
+    background: rgba(255,255,255,0.85);
+    cursor: pointer;
+  }
+  .empty { color: var(--sub); text-align: center; margin-top: 40px; }
+
+  /* ===== 下のナビゲーション ===== */
+  nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    display: flex;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+  }
+  nav button {
+    flex: 1;
+    padding: 14px 0;
+    border: none;
+    background: none;
+    font-size: 14px;
+    color: var(--sub);
+    cursor: pointer;
+  }
+  nav button.on { color: var(--accent); font-weight: bold; }
+
+  .screen { display: none; }
+  .screen.on { display: block; }
+
+  /* ===== ログインしてるかどうかで見せるものを切り替える ===== */
+  body:not(.logged-in) main,
+  body:not(.logged-in) nav,
+  body:not(.logged-in) .user-bar { display: none; }
+  body.logged-in #authScreen { display: none; }
+  body.loading main, body.loading nav, body.loading #authScreen { display: none; }
+
+  /* ===== ヘッダーのユーザー表示 ===== */
+  header { display: flex; align-items: center; justify-content: center; gap: 8px; }
+  body.logged-in header { justify-content: space-between; }
+  .user-bar {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: normal; letter-spacing: 0;
+  }
+  .user-bar .name { color: var(--sub); }
+  .user-bar button {
+    border: 1px solid var(--line); background: var(--card); color: var(--sub);
+    border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+
+  /* ===== ログイン・新規登録の画面 ===== */
+  #authScreen { max-width: 420px; margin: 0 auto; padding: 8px 16px 48px; }
+  .auth-tabs { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px; margin: 8px 0 20px; }
+  .auth-tabs button {
+    flex: 1; border: none; background: none; padding: 10px; border-radius: 999px;
+    font-size: 14px; color: var(--sub); cursor: pointer;
+  }
+  .auth-tabs button.on { background: var(--accent); color: #fff; font-weight: bold; }
+  .field { display: block; margin-bottom: 14px; }
+  .field span { display: block; font-size: 13px; color: var(--sub); margin-bottom: 6px; }
+  .field small { display: block; font-size: 11px; color: var(--sub); margin-top: 4px; }
+  .field input, .field select {
+    width: 100%; padding: 12px; font-size: 16px; /* 16px以上でiPhoneの自動ズームを防ぐ */
+    border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text);
+  }
+  .optional {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 14px 14px 2px; margin: 20px 0 4px;
+  }
+  .optional p { font-size: 12px; color: var(--sub); line-height: 1.6; margin: 0 0 12px; }
+  .optional b { color: var(--text); font-size: 13px; }
+  .auth-form { display: none; }
+  .auth-form.on { display: block; }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  /* ===== 引っ越しのお知らせ ===== */
+  .migrate {
+    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 16px;
+    padding: 14px; margin: 4px 0 16px;
+  }
+  .migrate p { margin: 0; font-size: 14px; line-height: 1.6; }
+  .migrate .btn { margin-top: 12px; }
+</style>
+</head>
+<body class="loading">
+
+<header>
+  MY CLOSET
+  <div class="user-bar">
+    <span class="name" id="userName"></span>
+    <button type="button" id="logoutBtn">ログアウト</button>
+  </div>
+</header>
+
+<!-- ========== ログイン・新規登録 ========== -->
+<section id="authScreen">
+  <div class="auth-tabs">
+    <button type="button" class="on" data-form="loginForm">ログイン</button>
+    <button type="button" data-form="signupForm">新規登録</button>
+  </div>
+
+  <!-- ログイン -->
+  <form class="auth-form on" id="loginForm" novalidate>
+    <label class="field"><span>メールアドレス</span>
+      <input type="email" id="loginEmail" autocomplete="email" required></label>
+    <label class="field"><span>パスワード</span>
+      <input type="password" id="loginPassword" autocomplete="current-password" required></label>
+    <button class="btn" type="submit">ログイン</button>
+    <div class="msg" id="loginMsg"></div>
+  </form>
+
+  <!-- 新規登録 -->
+  <form class="auth-form" id="signupForm" novalidate>
+    <label class="field"><span>メールアドレス</span>
+      <input type="email" id="suEmail" autocomplete="email" required></label>
+    <label class="field"><span>パスワード</span>
+      <input type="password" id="suPassword" autocomplete="new-password" required>
+      <small>6文字以上</small></label>
+    <label class="field"><span>ユーザー名</span>
+      <input type="text" id="suUsername" autocapitalize="off" autocomplete="username" required>
+      <small>検索で使うID。半角の英小文字・数字・_ で3〜20文字</small></label>
+    <label class="field"><span>表示名</span>
+      <input type="text" id="suDisplay" maxlength="20"></label>
+
+    <div class="label">骨格シルエット（台紙の人形の形になるよ）</div>
+    <div class="chips" id="silhouetteChips"></div>
+
+    <div class="optional">
+      <p><b>ここから下は入れなくてもOK</b><br>
+      入れてくれた情報は、だれのものか分からない形にまとめて「20代女性の人気コーデ」みたいな統計にだけ使います。ほかの人には見えません。</p>
+      <label class="field"><span>性別</span>
+        <select id="suGender">
+          <option value="">選ばない</option>
+          <option value="female">女性</option>
+          <option value="male">男性</option>
+          <option value="other">その他</option>
+          <option value="no_answer">答えない</option>
+        </select></label>
+      <label class="field"><span>生まれた年</span>
+        <select id="suBirthYear"><option value="">選ばない</option></select></label>
+      <label class="field"><span>住んでいる都道府県</span>
+        <select id="suPref"><option value="">選ばない</option></select></label>
+    </div>
+
+    <button class="btn" type="submit">登録する</button>
+    <div class="msg" id="signupMsg"></div>
+  </form>
+</section>
+
+<main>
+  <!-- ========== 画面1：クローゼット一覧 ========== -->
+  <section id="closetScreen" class="screen on">
+    <!-- スマホの中の服を倉庫に引っ越すボタン（引っ越す服があるときだけ出る） -->
+    <div class="migrate" id="migrateBox" hidden>
+      <p id="migrateText"></p>
+      <button class="btn" type="button" id="migrateBtn">倉庫に引っ越す</button>
+      <div class="msg" id="migrateMsg"></div>
+    </div>
+    <div class="chips" id="filterChips"></div>
+    <div class="grid" id="closetGrid"></div>
+  </section>
+
+  <!-- ========== 画面2：服の登録 ========== -->
+  <section id="addScreen" class="screen">
+    <h2>服を登録</h2>
+
+    <label class="photo-box" id="photoBox" for="photoInput">📷 タップして写真を撮る</label>
+    <!-- capture="environment" でスマホなら背面カメラが開く。PCならファイル選択 -->
+    <input type="file" id="photoInput" accept="image/*" capture="environment">
+
+    <div class="label">種類（1つ）</div>
+    <div class="chips" id="typeChips"></div>
+
+    <div class="label">季節（いくつでも）</div>
+    <div class="chips" id="seasonChips"></div>
+
+    <div class="label">雰囲気（いくつでも）</div>
+    <div class="chips" id="vibeChips"></div>
+
+    <div class="label">色（1つ）</div>
+    <div class="chips" id="colorChips"></div>
+
+    <button class="btn" id="saveBtn">保存する</button>
+    <div class="msg" id="msg"></div>
+  </section>
+</main>
+
+<nav>
+  <button class="on" data-screen="closetScreen">クローゼット</button>
+  <button data-screen="addScreen">＋ 服を登録</button>
+</nav>
+
+<script>
+// ==============================
+// タグの種類（ここを書き換えればタグを増やせる）
+// ==============================
+const TYPES   = ["トップス", "ボトムス", "ワンピース", "アウター", "靴", "バッグ", "アクセ"];
+const SEASONS = ["春", "夏", "秋", "冬"];
+const VIBES   = ["メンズライク", "カジュアル", "綺麗め", "海外ガール", "ダル着", "女の子らしい", "韓国っぽ"];
+const COLORS  = ["白", "黒", "グレー", "ベージュ", "ブラウン", "ネイビー", "青", "緑", "赤", "ピンク", "黄", "紫", "柄"];
+
+const STORAGE_KEY = "closet-items";
+
+// ==============================
+// 保存・読み込み（localStorage = ブラウザ内の保存場所）
+// ==============================
+function loadItems() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveItems(items) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    return true;
+  } catch (e) {
+    // 容量オーバーのときはここに来る
+    return false;
+  }
+}
+
+// ==============================
+// タグボタンを作る関数
+// multi = true なら複数選択、false なら1つだけ
+// ==============================
+function makeChips(containerId, list, multi) {
+  const box = document.getElementById(containerId);
+  box.innerHTML = "";
+  list.forEach(name => {
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.textContent = name;
+    chip.type = "button";
+    chip.addEventListener("click", () => {
+      if (!multi) {
+        // 1つだけ選べるタイプは、他の選択を外す
+        box.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+      }
+      chip.classList.toggle("on");
+    });
+    box.appendChild(chip);
+  });
+}
+
+// 選ばれているタグの名前を配列で取り出す
+function getSelected(containerId) {
+  return [...document.querySelectorAll("#" + containerId + " .chip.on")].map(c => c.textContent);
+}
+
+// ==============================
+// 写真の処理
+// そのままだと重すぎて保存できないので、縮小してから保存する
+// ==============================
+let currentPhoto = null; // 今選んでいる写真（縮小済み）
+
+document.getElementById("photoInput").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      // 正方形に切り抜いて 400px に縮小
+      const size = 400;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2;
+      const sy = (img.height - side) / 2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+
+      currentPhoto = canvas.toDataURL("image/jpeg", 0.7); // 画質70%のJPEGに変換
+      document.getElementById("photoBox").innerHTML = '<img src="' + currentPhoto + '" alt="選んだ服">';
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+// ==============================
+// 服の種類：画面に出す名前 ⇔ 倉庫に保存する名前
+// ==============================
+const CAT_CODE = { "トップス":"tops", "ボトムス":"bottoms", "ワンピース":"onepiece", "アウター":"outer", "靴":"shoes", "バッグ":"bag", "アクセ":"acc" };
+const CAT_NAME = Object.fromEntries(Object.entries(CAT_CODE).map(([k, v]) => [v, k]));
+
+let currentUser = null; // ログインしている人
+let myClothes = [];     // 倉庫から読み込んだ自分の服
+
+// ==============================
+// 倉庫に服を1着保存する（写真 → 写真置き場、タグ → clothesの棚）
+// ==============================
+async function uploadCloth({ photo, type, seasons, vibes, color }) {
+  // 写真（文字列になってる画像）をファイルの形に戻す
+  const blob = await (await fetch(photo)).blob();
+  // 写真の置き場所は「自分のID/ランダムな名前.jpg」
+  const rand = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : Date.now() + "-" + Math.random().toString(36).slice(2);
+  const path = currentUser.id + "/" + rand + ".jpg";
+
+  const up = await db.storage.from("clothes").upload(path, blob, { contentType: "image/jpeg" });
+  if (up.error) throw up.error;
+
+  const ins = await db.from("clothes").insert({
+    image_path: path,
+    category: CAT_CODE[type] || "tops",
+    color: color || null,
+    season: seasons || [],
+    styles: vibes || []
+  });
+  if (ins.error) {
+    // 棚に入れられへんかったら、置いた写真も片付ける
+    await db.storage.from("clothes").remove([path]);
+    throw ins.error;
+  }
+}
+
+// ==============================
+// 倉庫から自分の服を読み込む
+// ==============================
+async function loadMyClothes() {
+  const { data, error } = await db.from("clothes")
+    .select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false });
+  if (error) { console.warn(error); myClothes = []; return; }
+
+  // 写真置き場は鍵付きなので、1時間だけ見られる「期限付きURL」をまとめてもらう
+  let urls = {};
+  if (data.length) {
+    const { data: signed } = await db.storage.from("clothes")
+      .createSignedUrls(data.map(c => c.image_path), 60 * 60);
+    (signed || []).forEach(s => { if (s.signedUrl) urls[s.path] = s.signedUrl; });
+  }
+
+  myClothes = data.map(c => ({
+    id: c.id,
+    path: c.image_path,
+    photo: urls[c.image_path] || "",
+    type: CAT_NAME[c.category] || c.category,
+    seasons: c.season || [],
+    vibes: c.styles || [],
+    color: c.color || ""
+  }));
+}
+
+// ==============================
+// 保存ボタン
+// ==============================
+document.getElementById("saveBtn").addEventListener("click", async e => {
+  const msg = document.getElementById("msg");
+  const type = getSelected("typeChips")[0];
+
+  // 入力チェック：写真と種類は必須
+  if (!currentPhoto) { msg.textContent = "写真を選んでね"; return; }
+  if (!type)         { msg.textContent = "種類を選んでね"; return; }
+
+  const btn = e.currentTarget;
+  btn.disabled = true; msg.textContent = "保存中…";
+  try {
+    await uploadCloth({
+      photo: currentPhoto,
+      type: type,
+      seasons: getSelected("seasonChips"),
+      vibes: getSelected("vibeChips"),
+      color: getSelected("colorChips")[0] || ""
+    });
+    resetForm();
+    msg.textContent = "保存したよ！";
+    await loadMyClothes();
+    renderCloset();
+  } catch (err) {
+    console.warn(err);
+    msg.textContent = "保存できへんかった…ネットにつながってるか確認してね";
+  }
+  btn.disabled = false;
+});
+
+// フォームを空に戻す
+function resetForm() {
+  currentPhoto = null;
+  document.getElementById("photoInput").value = "";
+  document.getElementById("photoBox").textContent = "📷 タップして写真を撮る";
+  document.querySelectorAll("#addScreen .chip").forEach(c => c.classList.remove("on"));
+}
+
+// ==============================
+// クローゼット一覧の表示
+// ==============================
+let currentFilter = "すべて";
+
+function renderFilter() {
+  const box = document.getElementById("filterChips");
+  box.innerHTML = "";
+  ["すべて", ...TYPES].forEach(name => {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (name === currentFilter ? " on" : "");
+    chip.textContent = name;
+    chip.addEventListener("click", () => {
+      currentFilter = name;
+      renderFilter();
+      renderCloset();
+    });
+    box.appendChild(chip);
+  });
+}
+
+function renderCloset() {
+  const grid = document.getElementById("closetGrid");
+  let items = myClothes;
+  if (currentFilter !== "すべて") {
+    items = items.filter(i => i.type === currentFilter);
+  }
+
+  if (items.length === 0) {
+    grid.innerHTML = '<p class="empty" style="grid-column: 1 / -1;">まだ服がないよ。下の「＋ 服を登録」から追加してね</p>';
+    return;
+  }
+
+  grid.innerHTML = "";
+  // 新しく登録した順（読み込むときに並べ替え済み）
+  items.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "item";
+
+    const img = document.createElement("img");
+    img.src = item.photo;
+    img.alt = item.type;
+
+    const tags = document.createElement("div");
+    tags.className = "tags";
+    tags.textContent = [item.type, item.color, ...item.seasons, ...item.vibes].filter(Boolean).join(" / ");
+
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "×";
+    del.setAttribute("aria-label", "削除");
+    del.addEventListener("click", async () => {
+      if (!confirm("この服を削除する？")) return;
+      const { error } = await db.from("clothes").delete().eq("id", item.id);
+      if (error) { alert("削除できへんかった…"); return; }
+      await db.storage.from("clothes").remove([item.path]);
+      myClothes = myClothes.filter(c => c.id !== item.id);
+      renderCloset();
+    });
+
+    card.append(img, tags, del);
+    grid.appendChild(card);
+  });
+}
+
+// ==============================
+// 引っ越し：スマホの中（localStorage）の服を倉庫に移す
+// スマホの中の服は消さずに残しておく（念のための控え）
+// ==============================
+function movedKey() { return "closet-moved-ids-" + currentUser.id; }
+// もう引っ越した服の番号を覚えておく（途中で失敗してもやり直しで二重にならない）
+function loadMovedIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(movedKey())) || []); } catch (e) { return new Set(); }
+}
+function saveMovedIds(set) {
+  try { localStorage.setItem(movedKey(), JSON.stringify([...set])); } catch (e) {}
+}
+function notMovedYet() {
+  const moved = loadMovedIds();
+  return loadItems().filter(i => !moved.has(String(i.id)));
+}
+
+function showMigrateBox() {
+  const box = document.getElementById("migrateBox");
+  const rest = notMovedYet();
+  if (!rest.length) { box.hidden = true; return; }
+  document.getElementById("migrateText").textContent =
+    "このスマホの中に、前に登録した服が" + rest.length + "着あるよ。倉庫に引っ越すと、ほかのスマホやPCからも見られるようになる。";
+  box.hidden = false;
+}
+
+document.getElementById("migrateBtn").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  const msg = document.getElementById("migrateMsg");
+  const rest = notMovedYet();
+  const moved = loadMovedIds();
+  btn.disabled = true;
+  let ng = 0;
+  for (let i = 0; i < rest.length; i++) {
+    msg.textContent = "引っ越し中… " + (i + 1) + " / " + rest.length;
+    try {
+      await uploadCloth(rest[i]);
+      moved.add(String(rest[i].id));
+      saveMovedIds(moved); // 1着ごとに覚える
+    } catch (err) { console.warn(err); ng++; }
+  }
+  msg.textContent = ng ? ng + "着うまくいかへんかった。もう一回押すと、残りの服だけ送り直すよ" : "";
+  btn.disabled = false;
+  await loadMyClothes();
+  renderCloset();
+  showMigrateBox();
+});
+
+// ==============================
+// 画面の切り替え（下のナビ）
+// ==============================
+document.querySelectorAll("nav button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("on"));
+    document.querySelectorAll(".screen").forEach(s => s.classList.remove("on"));
+    btn.classList.add("on");
+    document.getElementById(btn.dataset.screen).classList.add("on");
+    document.getElementById("msg").textContent = "";
+  });
+});
+
+// ==============================
+// 引っ越し処理（11/1に一時的に別の名前で保存してた服を、こっちに合流させる）
+// ==============================
+function migrateFromTempVersion() {
+  const OLD_KEY = "coordinate-app-clothes";
+  let temp;
+  try {
+    temp = JSON.parse(localStorage.getItem(OLD_KEY));
+  } catch (e) {
+    return;
+  }
+  if (!Array.isArray(temp) || temp.length === 0) return;
+
+  const items = loadItems();
+  temp.forEach(t => {
+    items.push({
+      id: Number(t.id) || Date.now(),
+      photo: t.photo,
+      type: t.category === "アクセサリー" ? "アクセ" : t.category, // 呼び方をこっちに合わせる
+      seasons: [],
+      vibes: t.moods || [],
+      color: "",
+      createdAt: t.createdAt || new Date().toISOString()
+    });
+  });
+
+  // 合流が保存できた時だけ、一時的な方を消す
+  if (saveItems(items)) {
+    localStorage.removeItem(OLD_KEY);
+  }
+}
+
+// ==============================
+// Supabase（ネット上の倉庫）につなぐ
+// publishable key はアプリに書いても大丈夫な「入口の鍵」
+// （secret / service_role の鍵は絶対にここに書かない）
+// ==============================
+const SUPABASE_URL = "https://oczcojgwcjoklonxhkbj.supabase.co";
+const SUPABASE_KEY = "sb_publishable_x0BJBMa4xnpwoFc9JJDi_Q_8Uf7CSan";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const SILHOUETTES = { straight: "ストレート", wave: "ウェーブ", natural: "ナチュラル" };
+const PREFS = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+
+// ===== 登録画面の選択肢を作る =====
+function setupSignupOptions() {
+  // 骨格シルエット（1つだけ選べる。最初はストレート）
+  makeChips("silhouetteChips", Object.values(SILHOUETTES), false);
+  document.querySelector("#silhouetteChips .chip").classList.add("on");
+
+  // 生まれた年（新しい年が上）
+  const yearSel = document.getElementById("suBirthYear");
+  const thisYear = new Date().getFullYear();
+  for (let y = thisYear - 10; y >= 1940; y--) {
+    yearSel.add(new Option(y + "年", y));
+  }
+  // 都道府県
+  const prefSel = document.getElementById("suPref");
+  PREFS.forEach(p => prefSel.add(new Option(p, p)));
+}
+
+// ===== ログイン／新規登録のタブ切り替え =====
+document.querySelectorAll(".auth-tabs button").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".auth-tabs button").forEach(t => t.classList.toggle("on", t === tab));
+    document.querySelectorAll(".auth-form").forEach(f => f.classList.toggle("on", f.id === tab.dataset.form));
+    document.getElementById("loginMsg").textContent = "";
+    document.getElementById("signupMsg").textContent = "";
+  });
+});
+
+// ===== Supabaseの英語のエラーを日本語にする =====
+function toJapanese(error) {
+  const m = (error && error.message) || "";
+  if (m.includes("Invalid login credentials")) return "メールアドレスかパスワードが違うみたい";
+  if (m.includes("already registered"))        return "そのメールアドレスはもう登録されてるよ。ログインしてみてね";
+  if (m.includes("Database error saving"))     return "そのユーザー名はもう使われてるみたい。別のにしてね";
+  if (m.includes("Password should be"))        return "パスワードは6文字以上にしてね";
+  if (m.includes("valid email") || m.includes("invalid format")) return "メールアドレスの形がおかしいかも";
+  if (m.includes("rate limit") || m.includes("security purposes")) return "短い時間に何回も試したみたい。少し待ってからもう一回やってね";
+  if (m.includes("Failed to fetch"))           return "ネットにつながってないかも";
+  return "うまくいかへんかった…（" + m + "）";
+}
+
+// ===== ログイン =====
+document.getElementById("loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = document.getElementById("loginMsg");
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  if (!email || !password) { msg.textContent = "メールアドレスとパスワードを入れてね"; return; }
+
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true; msg.textContent = "ログイン中…";
+  const { error } = await db.auth.signInWithPassword({ email, password });
+  btn.disabled = false;
+  msg.textContent = error ? toJapanese(error) : "";
+  // 成功したら onAuthStateChange（下）が画面を切り替える
+});
+
+// ===== 新規登録 =====
+document.getElementById("signupForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = document.getElementById("signupMsg");
+  const email    = document.getElementById("suEmail").value.trim();
+  const password = document.getElementById("suPassword").value;
+  const username = document.getElementById("suUsername").value.trim().toLowerCase();
+  const display  = document.getElementById("suDisplay").value.trim();
+  const silName  = getSelected("silhouetteChips")[0] || "ストレート";
+  const silhouette = Object.keys(SILHOUETTES).find(k => SILHOUETTES[k] === silName);
+
+  // 入力チェック
+  if (!email)                          { msg.textContent = "メールアドレスを入れてね"; return; }
+  if (password.length < 6)             { msg.textContent = "パスワードは6文字以上にしてね"; return; }
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) { msg.textContent = "ユーザー名は半角の英小文字・数字・_ で3〜20文字にしてね"; return; }
+
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true; msg.textContent = "登録中…";
+
+  // ① アカウントを作る（ユーザー名などは倉庫側で自動的にプロフィールの棚に入る）
+  const { data, error } = await db.auth.signUp({
+    email, password,
+    options: { data: { username, display_name: display || username, silhouette } }
+  });
+  if (error) { btn.disabled = false; msg.textContent = toJapanese(error); return; }
+
+  // ② 任意の情報（性別・生まれ年・都道府県）を、本人しか見えない棚に入れる
+  const gender     = document.getElementById("suGender").value || null;
+  const birth_year = Number(document.getElementById("suBirthYear").value) || null;
+  const prefecture = document.getElementById("suPref").value || null;
+  if (data.session && (gender || birth_year || prefecture)) {
+    const { error: e2 } = await db.from("profile_private")
+      .update({ gender, birth_year, prefecture })
+      .eq("id", data.user.id);
+    if (e2) console.warn("任意の情報を保存できへんかった", e2);
+  }
+
+  btn.disabled = false;
+  if (!data.session) {
+    // 「確認メール」がオンのままだとここに来る
+    msg.textContent = "確認メールを送ったよ。メールのリンクを押してからログインしてね";
+  }
+});
+
+// ===== ログアウト =====
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  await db.auth.signOut();
+});
+
+// ===== ログイン状態が変わったら画面を切り替える =====
+async function showUser(session) {
+  document.body.classList.remove("loading");
+  document.body.classList.toggle("logged-in", !!session);
+  if (!session) { currentUser = null; myClothes = []; renderCloset(); return; }
+  currentUser = session.user;
+
+  // 自分の服を倉庫から読み込んで表示
+  document.getElementById("closetGrid").innerHTML = '<p class="empty" style="grid-column: 1 / -1;">読み込み中…</p>';
+  loadMyClothes().then(() => { renderCloset(); showMigrateBox(); });
+
+  // ヘッダーに自分のユーザー名を出す
+  const { data } = await db.from("profiles")
+    .select("username, display_name").eq("id", session.user.id).single();
+  document.getElementById("userName").textContent = data ? "@" + data.username : "";
+}
+
+db.auth.onAuthStateChange((_event, session) => {
+  // この中で await するとSupabaseの処理が止まることがあるので、少しずらして実行する
+  setTimeout(() => showUser(session), 0);
+});
+
+// ==============================
+// 最初の準備
+// ==============================
+setupSignupOptions();
+migrateFromTempVersion();
+makeChips("typeChips", TYPES, false);
+makeChips("seasonChips", SEASONS, true);
+makeChips("vibeChips", VIBES, true);
+makeChips("colorChips", COLORS, false);
+renderFilter();
+</script>
+</body>
+</html>
